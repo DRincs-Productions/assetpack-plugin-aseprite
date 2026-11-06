@@ -12,14 +12,8 @@ export default defineConfig([
         clean: false,
         minify: true,
         bundle: true,
-        skipNodeModulesBundle: false,
-        external: ["@drincs/pixi-vn", "pixi.js"],
-        esbuildOptions(options) {
-            options.alias = {
-                ...options.alias,
-                "pixi.js": "@drincs/pixi-vn/pixi.js",
-            };
-        },
+        skipNodeModulesBundle: true,
+        external: ["@assetpack/core", "ase-parser", "sharp"],
         outExtension({ format }) {
             return {
                 js: format === "esm" ? ".mjs" : ".cjs",

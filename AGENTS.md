@@ -1,42 +1,31 @@
-# Developing this Pixi'VN extension
+# Developing the Aseprite AssetPack plugin
 
-This repository is a reusable library that extends `@drincs/pixi-vn`. Keep the library generic:
-do not add game-specific story content, character names, asset aliases, or UI conventions to `src/`.
-Prefer small, reusable public APIs and export public symbols from the appropriate `index.ts` files.
+This repository converts Aseprite and LibreSprite source files into PixiJS spritesheets through
+PixiJS AssetPack. It has no Pixi'VN runtime component. Keep changes focused on build-time asset
+conversion and export public APIs from `src/index.ts`.
 
 ## Tests
 
-Use Vitest for behavior that can be checked without a real browser. Tests belong in `tests/` and
-should cover new features and bug fixes whenever their behavior is observable in Vitest. Run the
-suite with:
+Use Vitest for conversion behavior that can be observed without a browser. Tests belong in `tests/`
+and should cover generated PNG pixels, spritesheet JSON, and preserved Aseprite metadata. Prefer
+small synthetic fixtures; use a real Aseprite/LibreSprite file when a parser behavior cannot be
+represented by a synthetic fixture. Run the suite with:
 
 ```bash
 npm test
 ```
 
 The project also provides `npm run build`, `npm run lint`, and `npm run check` for build and code
-quality checks. Keep tests focused on the library behavior rather than the example application.
-
-## Playground
-
-`playground/` is a small runnable app for trying this extension together with Pixi'VN. Use it to
-exercise integration behavior that is awkward or impossible to verify in Vitest, such as actual
-PixiJS rendering, browser timing, and visual interactions. It is a development and verification
-tool, not part of the published library API.
-
-Install its dependencies with `npm run playground:install`, then start it with
-`npm run playground:dev`. For a production-style build and preview, use `npm run playground:preview`.
-When a change depends on real browser behavior, add or update a focused playground example and
-inspect the result in the browser.
+quality checks.
 
 ## Project skills
 
 As the project develops, add a root `skills/` directory with project-specific `SKILL.md` files that
-explain the extension's public APIs and common development workflows in clear, actionable language
-for AI coding agents. Create or update a skill when a feature introduces non-obvious usage,
-conventions, or setup steps that an agent would need in another project. Keep skills specific to
-this extension, accurate to the current source, and written in English. This directory is optional;
-the skill validation workflow skips its checks until at least one `skills/<name>/SKILL.md` exists.
+explain the plugin's public APIs and common development workflows in clear, actionable language for
+AI coding agents. Create or update a skill when a feature introduces non-obvious usage, conventions,
+or setup steps that an agent would need in another project. Keep skills specific to this plugin,
+accurate to the current source, and written in English. This directory is optional; the skill
+validation workflow skips its checks until at least one `skills/<name>/SKILL.md` exists.
 
 Validate the skill files before release with:
 
