@@ -7,6 +7,7 @@ import sharp from "sharp";
 import { afterEach, expect, test } from "vitest";
 import { aseprite } from "../src";
 import { buildAseprite } from "./fixtures/aseprite-file";
+import { buildPixelorama } from "./fixtures/pixelorama-file";
 
 const PIXEL_FIRE = join(import.meta.dirname, "fixtures", "pixel-fire.aseprite");
 const temporaryDirectories: string[] = [];
@@ -173,4 +174,31 @@ test("trimExtensions removes .ase but not .aseprite from the aliases", async () 
     const { find } = await build({ "fire.ase": PIXEL_FIRE, "smoke.aseprite": PIXEL_FIRE });
     expect(find("fire.ase").alias).toEqual(["fire.ase", "fire"]);
     expect(find("smoke.aseprite").alias).toEqual(["smoke.aseprite"]);
+});
+
+test("converts Pixelorama projects next to Aseprite files", async () => {
+    const pxo = buildPixelorama({
+        width: 2,
+        height: 1,
+        layers: [{ name: "layer" }],
+        frames: [
+            { cels: [{ pixels: [[255, 0, 0, 255]] }] },
+            { cels: [{ pixels: [[0, 255, 0, 255]] }] },
+        ],
+        tags: [{ name: "blink", from: 1, to: 2 }],
+    });
+    const { find, readJson } = await build({
+        "effects/spark.pxo": pxo,
+        "effects/fire.aseprite": PIXEL_FIRE,
+    });
+    const spark = find("spark");
+    expect(spark.alias).toEqual(["effects/spark.pxo", "effects/spark", "spark.pxo", "spark"]);
+    expect(spark.src.map((src) => src.match(/\.(png|webp)\.json$/)?.[1]).sort()).toEqual([
+        "png",
+        "webp",
+    ]);
+    const json = await readJson(spark.src[0]);
+    expect(json.animations).toEqual({ blink: ["spark_0", "spark_1"] });
+    expect(json.meta.pixelorama.layers[0].name).toBe("layer");
+    expect(find("fire.aseprite").src).toHaveLength(2);
 });
