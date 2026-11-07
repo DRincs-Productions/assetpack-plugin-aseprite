@@ -37,3 +37,31 @@ test("reuses unchanged source conversions across builds and rebuilds changed sou
         await rm(root, { recursive: true, force: true });
     }
 });
+
+test("converts again when the plugin options change", async () => {
+    const root = await mkdtemp(join(tmpdir(), "aseprite-cache-options-"));
+    try {
+        const entry = join(root, "input");
+        await mkdir(entry);
+        await writeFile(join(entry, "sprite.aseprite"), makeAsepriteFixture());
+        const run = async (layerPrefix?: string) => {
+            const pipe = aseprite({ layerPrefix });
+            const transform = vi.fn(pipe.transform);
+            pipe.transform = transform;
+            await new AssetPack({
+                entry,
+                output: join(root, "output"),
+                cacheLocation: join(root, "cache"),
+                cache: true,
+                strict: true,
+                pipes: [pipe],
+            }).run();
+            return transform.mock.calls.length;
+        };
+        expect(await run()).toBe(1);
+        expect(await run()).toBe(0);
+        expect(await run("body")).toBe(1);
+    } finally {
+        await rm(root, { recursive: true, force: true });
+    }
+});

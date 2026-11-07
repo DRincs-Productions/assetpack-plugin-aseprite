@@ -1,12 +1,37 @@
 import Aseprite from "ase-parser";
-import { createNewAssetAt, type AssetPipe } from "@assetpack/core";
+import { type AssetPipe, BuildReporter, createNewAssetAt, stripTags } from "@assetpack/core";
 import sharp from "sharp";
+import { version } from "../package.json";
 
 export { asepriteManifestMod, type AsepriteManifestModOptions } from "./manifest";
 
 export interface AsepritePluginOptions {
     /** Include only raster layers whose names begin with this value. */
     layerPrefix?: string;
+    /**
+     * Maximum width of the generated texture. Frames are laid out left to right and wrap to a new
+     * row when the next frame would exceed this width.
+     * @default 4096
+     */
+    maxTextureSize?: number;
+}
+
+/** Sharp's maximum image dimension. */
+const SHARP_MAX_DIMENSION = 16383;
+/** Header flag: layer opacity has a valid value. */
+const HEADER_LAYER_OPACITY_VALID = 1;
+/** Header flag: group opacity and blend mode have valid values. */
+const HEADER_GROUP_OPACITY_VALID = 2;
+
+interface RenderOptions {
+    layerPrefix?: string;
+    layerOpacityValid: boolean;
+    groupOpacityValid: boolean;
+}
+
+interface FrameLayout {
+    columns: number;
+    rows: number;
 }
 
 interface LayerNode {
@@ -34,11 +59,11 @@ const PLAYBACK_DIRECTIONS: Record<string, string> = {
 export function aseprite(options: AsepritePluginOptions = {}): AssetPipe {
     return {
         name: "aseprite",
-        defaultOptions: { ...options },
+        defaultOptions: { maxTextureSize: 4096, ...options },
         test(asset) {
             return !asset.isFolder && [".ase", ".aseprite"].includes(asset.extension.toLowerCase());
         },
-        async transform(asset, _pipeOptions, pipeSystem) {
+        async transform(asset, pipeOptions: AsepritePluginOptions, pipeSystem) {
             const ase = new Aseprite(asset.buffer, asset.filename);
             ase.parse();
 
@@ -47,35 +72,41 @@ export function aseprite(options: AsepritePluginOptions = {}): AssetPipe {
                     `Aseprite plugin supports 32-bit RGBA documents; ${asset.filename} is ${ase.colorDepth}-bit.`,
                 );
             }
-            if (Math.max(ase.width * ase.numFrames, ase.height) > 16383) {
-                throw new Error(
-                    `Aseprite sprite strip for ${asset.filename} exceeds Sharp's 16383-pixel dimension limit.`,
-                );
-            }
+
+            const headerFlags = asset.buffer.readUInt32LE(14);
+            const renderOptions: RenderOptions = {
+                layerPrefix: pipeOptions.layerPrefix,
+                layerOpacityValid: (headerFlags & HEADER_LAYER_OPACITY_VALID) !== 0,
+                groupOpacityValid: (headerFlags & HEADER_GROUP_OPACITY_VALID) !== 0,
+            };
+            const layout = getFrameLayout(ase, pipeOptions.maxTextureSize ?? 4096, asset.filename);
+            const textureWidth = ase.width * layout.columns;
+            const textureHeight = ase.height * layout.rows;
 
             const rendered = ase.frames.map((frame, frameIndex) => ({
-                data: renderFrame(ase, frameIndex, options),
+                data: renderFrame(ase, frameIndex, renderOptions),
                 duration: frame.frameDuration,
             }));
-            const strip = Buffer.alloc(ase.width * rendered.length * ase.height * 4);
+            const texture = Buffer.alloc(textureWidth * textureHeight * 4);
             rendered.forEach(({ data }, frameIndex) => {
+                const { x, y } = getFramePosition(ase, layout, frameIndex);
                 for (let row = 0; row < ase.height; row++) {
                     const sourceStart = row * ase.width * 4;
-                    const targetStart =
-                        (row * ase.width * rendered.length + frameIndex * ase.width) * 4;
-                    data.copy(strip, targetStart, sourceStart, sourceStart + ase.width * 4);
+                    const targetStart = ((y + row) * textureWidth + x) * 4;
+                    data.copy(texture, targetStart, sourceStart, sourceStart + ase.width * 4);
                 }
             });
 
             const baseName = asset.filename.replace(/\.(aseprite|ase)$/i, "");
+            const name = stripTags(baseName);
             const imageName = `${baseName}.png`;
             const jsonName = `${baseName}.json`;
-            const png = await sharp(strip, {
-                raw: { width: ase.width * rendered.length, height: ase.height, channels: 4 },
+            const png = await sharp(texture, {
+                raw: { width: textureWidth, height: textureHeight, channels: 4 },
             })
                 .png()
                 .toBuffer();
-            const json = createSpritesheetJson(ase, rendered, imageName, baseName);
+            const json = createSpritesheetJson(ase, rendered, layout, imageName, name);
 
             const imageAsset = createNewAssetAt(asset, imageName, pipeSystem.outputPath);
             imageAsset.buffer = png;
@@ -92,18 +123,47 @@ export function aseprite(options: AsepritePluginOptions = {}): AssetPipe {
     };
 }
 
-function renderFrame(ase: Aseprite, frameIndex: number, options: AsepritePluginOptions): Buffer {
+function getFrameLayout(ase: Aseprite, maxTextureSize: number, filename: string): FrameLayout {
+    const frameCount = ase.frames.length;
+    const columns = Math.min(frameCount, Math.max(1, Math.floor(maxTextureSize / ase.width)));
+    const rows = Math.ceil(frameCount / columns);
+    const width = ase.width * columns;
+    const height = ase.height * rows;
+    if (Math.max(width, height) > SHARP_MAX_DIMENSION) {
+        throw new Error(
+            `Aseprite texture for ${filename} (${width}x${height}) exceeds Sharp's ${SHARP_MAX_DIMENSION}-pixel dimension limit.`,
+        );
+    }
+    if (Math.max(width, height) > maxTextureSize) {
+        BuildReporter.warn(
+            `[aseprite] Texture for ${filename} is ${width}x${height}, larger than maxTextureSize ${maxTextureSize}; some GPUs cannot load it.`,
+        );
+    }
+    return { columns, rows };
+}
+
+function getFramePosition(ase: Aseprite, layout: FrameLayout, frameIndex: number) {
+    return {
+        x: (frameIndex % layout.columns) * ase.width,
+        y: Math.floor(frameIndex / layout.columns) * ase.height,
+    };
+}
+
+function renderFrame(ase: Aseprite, frameIndex: number, options: RenderOptions): Buffer {
     const output = Buffer.alloc(ase.width * ase.height * 4);
     const tree = createLayerTree(ase.layers);
     const cels = ase.frames[frameIndex].cels;
 
     const renderNode = (node: LayerNode, target: Buffer, inheritedOpacity: number): void => {
         const { layer } = node;
-        if (!layer.flags.visible) return;
-        const opacity = (inheritedOpacity * layer.opacity) / 255;
+        // Reference layers are editor-only, Aseprite never exports them.
+        if (!layer.flags.visible || layer.flags.reference) return;
 
         if (layer.type === 1) {
-            if (layer.blendMode !== 0) {
+            const opacity = options.groupOpacityValid
+                ? (inheritedOpacity * layer.opacity) / 255
+                : inheritedOpacity;
+            if (options.groupOpacityValid && layer.blendMode !== 0) {
                 throw new Error(
                     `Unsupported blend mode ${layer.blendMode} in group "${layer.name}"; only normal blending is supported.`,
                 );
@@ -119,6 +179,9 @@ function renderFrame(ase: Aseprite, frameIndex: number, options: AsepritePluginO
                 `Unsupported Aseprite layer type ${layer.type} in layer "${layer.name}".`,
             );
         }
+        const opacity = options.layerOpacityValid
+            ? (inheritedOpacity * layer.opacity) / 255
+            : inheritedOpacity;
         if (layer.blendMode !== 0) {
             throw new Error(
                 `Unsupported blend mode ${layer.blendMode} in layer "${layer.name}"; only normal blending is supported.`,
@@ -207,15 +270,19 @@ function composite(
 function createSpritesheetJson(
     ase: Aseprite,
     frames: RenderedFrame[],
+    layout: FrameLayout,
     imageName: string,
-    defaultAnimationName: string,
+    name: string,
 ) {
+    // Frame names are prefixed with the file name because PixiJS caches every spritesheet
+    // texture globally by frame name: two files with "frame0" would overwrite each other.
+    const frameName = (index: number) => `${name}_${index}`;
     const frameData: Record<string, unknown> = {};
     const animations: Record<string, string[]> = {};
     frames.forEach(({ duration }, index) => {
-        const name = `frame${index}`;
-        frameData[name] = {
-            frame: { x: index * ase.width, y: 0, w: ase.width, h: ase.height },
+        const { x, y } = getFramePosition(ase, layout, index);
+        frameData[frameName(index)] = {
+            frame: { x, y, w: ase.width, h: ase.height },
             rotated: false,
             trimmed: false,
             spriteSourceSize: { x: 0, y: 0, w: ase.width, h: ase.height },
@@ -242,11 +309,17 @@ function createSpritesheetJson(
             indices.reverse();
             indices.push(...indices.slice(1, -1).reverse());
         }
-        animations[tag.name] = indices.map((index) => `frame${index}`);
+        if (animations[tag.name]) {
+            BuildReporter.warn(
+                `[aseprite] Duplicate tag "${tag.name}" in ${ase.name}; only the first one becomes an animation.`,
+            );
+            continue;
+        }
+        animations[tag.name] = indices.map(frameName);
     }
     if (ase.tags.length === 0) {
         // Without tags, expose every frame as one animation named after the source file.
-        animations[defaultAnimationName] = frames.map((_, index) => `frame${index}`);
+        animations[name] = frames.map((_, index) => frameName(index));
     }
 
     return {
@@ -254,10 +327,10 @@ function createSpritesheetJson(
         animations,
         meta: {
             app: "@drincs/assetpack-plugin-aseprite",
-            version: "0.1.0",
+            version,
             image: imageName,
             format: "RGBA8888",
-            size: { w: ase.width * frames.length, h: ase.height },
+            size: { w: ase.width * layout.columns, h: ase.height * layout.rows },
             scale: "1",
             // AssetPack's texturePackerCompress hides the per-format JSON copies from the
             // manifest unless this field exists, as it does in AssetPack's own texture packer.
