@@ -5,11 +5,14 @@ import { AssetPack, type AssetPackConfig } from "@assetpack/core";
 import { pixiPipes } from "@assetpack/core/pixi";
 import sharp from "sharp";
 import { afterEach, expect, test } from "vitest";
-import { aseprite, asepriteManifestMod } from "../src";
+import { aseprite } from "../src";
 import { buildAseprite } from "./fixtures/aseprite-file";
 
 const PIXEL_FIRE = join(import.meta.dirname, "fixtures", "pixel-fire.aseprite");
 const temporaryDirectories: string[] = [];
+
+// Sharp keeps read files open in its cache, which blocks deleting them on Windows.
+sharp.cache(false);
 
 interface ManifestAsset {
     alias: string[];
@@ -27,15 +30,7 @@ afterEach(async () => {
 /** Copies or writes the given files into a temporary entry folder and runs AssetPack with pixiPipes. */
 async function build(
     files: Record<string, string | Buffer>,
-    {
-        manifestMod = true,
-        manifestOutput,
-        assetSettings,
-    }: {
-        manifestMod?: boolean;
-        manifestOutput?: string;
-        assetSettings?: AssetPackConfig["assetSettings"];
-    } = {},
+    { assetSettings }: { assetSettings?: AssetPackConfig["assetSettings"] } = {},
 ) {
     const root = await mkdtemp(join(tmpdir(), "aseprite-manifest-"));
     temporaryDirectories.push(root);
@@ -47,7 +42,7 @@ async function build(
         if (typeof source === "string") await copyFile(source, target);
         else await writeFile(target, source);
     }
-    const manifestPath = manifestOutput ?? join(root, "manifest.json");
+    const manifestPath = join(root, "manifest.json");
     await new AssetPack({
         entry,
         output,
@@ -58,12 +53,10 @@ async function build(
             ...pixiPipes({
                 manifest: { output: manifestPath, createShortcuts: true, trimExtensions: true },
             }),
-            ...(manifestMod ? [asepriteManifestMod({ output: manifestPath })] : []),
         ],
     }).run();
 
-    const manifestFile = manifestOutput ? join(output, manifestOutput) : manifestPath;
-    const manifest = JSON.parse(await readFile(manifestFile, "utf8"));
+    const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
     const assets: ManifestAsset[] = manifest.bundles.flatMap(
         (bundle: { assets: ManifestAsset[] }) => bundle.assets,
     );
@@ -82,12 +75,7 @@ test("lists only the spritesheet JSON files for a real Aseprite file in the Pixi
     });
 
     expect(assets).toHaveLength(1);
-    expect(assets[0].alias).toEqual([
-        "animated-sprite/pixel-fire.aseprite",
-        "pixel-fire.aseprite",
-        "animated-sprite/pixel-fire",
-        "pixel-fire",
-    ]);
+    expect(assets[0].alias).toEqual(["animated-sprite/pixel-fire.aseprite", "pixel-fire.aseprite"]);
     expect(assets[0].src).toHaveLength(2);
     expect(assets[0].src.map((src) => src.match(/\.(png|webp)\.json$/)?.[1]).sort()).toEqual([
         "png",
@@ -112,7 +100,7 @@ test("lists only the spritesheet JSON files for a real Aseprite file in the Pixi
 
 test("keeps the real file's pixels and frame durations", async () => {
     const { find, output, readJson } = await build({ "pixel-fire.aseprite": PIXEL_FIRE });
-    const src = find("pixel-fire").src.find((item) => item.endsWith(".png.json"));
+    const src = find("pixel-fire.aseprite").src.find((item) => item.endsWith(".png.json"));
     if (!src) throw new Error("Missing PNG spritesheet.");
     const json = await readJson(src);
     expect(json.meta.aseprite).toMatchObject({ frameCount: 14, colorDepth: 32 });
@@ -134,8 +122,8 @@ test("gives each Aseprite file its own frame names so PixiJS cache keys do not c
         "effects/smoke.aseprite": PIXEL_FIRE,
     });
     expect(assets).toHaveLength(2);
-    const fire = await readJson(find("fire").src[0]);
-    const smoke = await readJson(find("smoke").src[0]);
+    const fire = await readJson(find("fire.aseprite").src[0]);
+    const smoke = await readJson(find("smoke.aseprite").src[0]);
     const fireFrames = new Set(Object.keys(fire.frames));
     expect(Object.keys(smoke.frames).some((name) => fireFrames.has(name))).toBe(false);
     expect(Object.keys(fire.animations)).toEqual(["fire"]);
@@ -176,36 +164,13 @@ test("applies per-asset settings from assetSettings", async () => {
             .toBuffer({ resolveWithObject: true });
         return [...data.subarray(0, 4)];
     };
-    expect(await firstPixel("hero")).toEqual([255, 0, 0, 255]);
-    expect(await firstPixel("other")).toEqual([0, 0, 255, 255]);
+    expect(await firstPixel("hero.aseprite")).toEqual([255, 0, 0, 255]);
+    expect(await firstPixel("other.aseprite")).toEqual([0, 0, 255, 255]);
 });
 
-test("without asepriteManifestMod, the .aseprite alias keeps its extension", async () => {
-    const { assets } = await build({ "pixel-fire.aseprite": PIXEL_FIRE }, { manifestMod: false });
-    expect(assets[0].alias).toEqual(["pixel-fire.aseprite"]);
-});
-
-test("asepriteManifestMod does not add an alias that another asset already uses", async () => {
-    const png = await sharp({
-        create: { width: 1, height: 1, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 1 } },
-    })
-        .png()
-        .toBuffer();
-    const { find } = await build({ "fire.aseprite": PIXEL_FIRE, "fire.png": png });
-    expect(find("fire.png").alias).toContain("fire");
-    expect(find("fire.aseprite").alias).not.toContain("fire");
-});
-
-test("asepriteManifestMod handles upper-case .ASE files", async () => {
-    const { assets } = await build({ "Hero.ASE": PIXEL_FIRE });
-    expect(assets[0].alias).toContain("Hero");
-    expect(new Set(assets[0].alias).size).toBe(assets[0].alias.length);
-});
-
-test("asepriteManifestMod resolves a bare manifest file name inside the output folder", async () => {
-    const { assets } = await build(
-        { "pixel-fire.aseprite": PIXEL_FIRE },
-        { manifestOutput: "manifest.json" },
-    );
-    expect(assets[0].alias).toContain("pixel-fire");
+test("trimExtensions removes .ase but not .aseprite from the aliases", async () => {
+    // AssetPack's trimExtensions skips extensions longer than six characters.
+    const { find } = await build({ "fire.ase": PIXEL_FIRE, "smoke.aseprite": PIXEL_FIRE });
+    expect(find("fire.ase").alias).toEqual(["fire.ase", "fire"]);
+    expect(find("smoke.aseprite").alias).toEqual(["smoke.aseprite"]);
 });

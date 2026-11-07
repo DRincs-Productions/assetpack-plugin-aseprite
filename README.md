@@ -13,21 +13,21 @@ Install the plugin and AssetPack as development dependencies. They run during th
 ## Configure AssetPack
 
 ```ts
-import { aseprite, asepriteManifestMod } from "@drincs/assetpack-plugin-aseprite";
+import { aseprite } from "@drincs/assetpack-plugin-aseprite";
 import { pixiPipes } from "@assetpack/core/pixi";
-
-const manifest = { output: "src/manifest.json", createShortcuts: true, trimExtensions: true };
 
 export default {
     entry: "public/assets",
     output: "public/assets-build",
     cache: true,
     cacheLocation: ".assetpack",
-    pipes: [aseprite(), ...pixiPipes({ manifest }), asepriteManifestMod({ output: manifest.output })],
+    pipes: [aseprite(), ...pixiPipes({ manifest: { createShortcuts: true, trimExtensions: true } })],
 };
 ```
 
-`aseprite()` must come before `pixiPipes()`. `asepriteManifestMod()` is optional and goes after it, with the same manifest `output`. It adds aliases without the extension (`walk.aseprite` → `walk`), because AssetPack's `trimExtensions` ignores extensions longer than six characters such as `.aseprite`.
+`aseprite()` must come before `pixiPipes()`.
+
+Manifest aliases come from the source file name. AssetPack's `trimExtensions` removes `.ase` (`walk.ase` → `walk`) but not `.aseprite`, because it skips extensions longer than six characters: a `walk.aseprite` file is only reachable as `walk.aseprite`. Save files with the `.ase` extension (same format) to get aliases without the extension.
 
 AssetPack caches source content hashes and reuses unchanged conversions across builds. Keep the `.assetpack` directory between runs, including in CI, to retain that cache. A source content change or a change to plugin options invalidates the relevant cache. Setting `cache: false` forces conversion again.
 

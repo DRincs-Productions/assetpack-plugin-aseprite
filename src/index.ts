@@ -3,8 +3,6 @@ import { type AssetPipe, BuildReporter, createNewAssetAt, stripTags } from "@ass
 import sharp from "sharp";
 import { version } from "../package.json";
 
-export { asepriteManifestMod, type AsepriteManifestModOptions } from "./manifest";
-
 export interface AsepritePluginOptions {
     /** Include only raster layers whose names begin with this value. */
     layerPrefix?: string;
