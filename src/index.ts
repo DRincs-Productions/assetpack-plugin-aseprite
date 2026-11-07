@@ -57,7 +57,9 @@ const PLAYBACK_DIRECTIONS: Record<string, string> = {
 export function aseprite(options: AsepritePluginOptions = {}): AssetPipe {
     return {
         name: "aseprite",
-        defaultOptions: { maxTextureSize: 4096, ...options },
+        // AssetPack hashes defaultOptions into its cache name, so including the plugin version
+        // makes a plugin upgrade convert the files again instead of reusing old output.
+        defaultOptions: { maxTextureSize: 4096, ...options, pluginVersion: version },
         test(asset) {
             return !asset.isFolder && [".ase", ".aseprite"].includes(asset.extension.toLowerCase());
         },

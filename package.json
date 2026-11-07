@@ -1,7 +1,7 @@
 {
   "name": "@drincs/assetpack-plugin-aseprite",
   "description": "AssetPack plugin that converts Aseprite and LibreSprite files into PixiJS spritesheets (PNG + JSON) at build time",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "type": "module",
   "main": "./dist/index.cjs",
   "module": "./dist/index.mjs",

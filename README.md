@@ -29,7 +29,7 @@ export default {
 
 Manifest aliases come from the source file name. AssetPack's `trimExtensions` removes `.ase` (`walk.ase` → `walk`) but not `.aseprite`, because it skips extensions longer than six characters: a `walk.aseprite` file is only reachable as `walk.aseprite`. Save files with the `.ase` extension (same format) to get aliases without the extension.
 
-AssetPack caches source content hashes and reuses unchanged conversions across builds. Keep the `.assetpack` directory between runs, including in CI, to retain that cache. A source content change or a change to plugin options invalidates the relevant cache. Setting `cache: false` forces conversion again.
+AssetPack caches source content hashes and reuses unchanged conversions across builds. Keep the `.assetpack` directory between runs, including in CI, to retain that cache. A source content change, a change to plugin options, or a plugin upgrade invalidates the relevant cache. Setting `cache: false` forces conversion again.
 
 Each source file produces a PNG texture and a PixiJS spritesheet JSON with frame rectangles, frame durations, and named animations from Aseprite tags. The JSON also retains JSON-safe Aseprite data under `meta.aseprite` (document header, layers, tags including playback/repeat settings, slices, palette, color profile, and durations). This data is available to game code after loading the spritesheet. Tags with finite repeats preserve the repeat count as metadata; PixiJS animation definitions themselves do not enforce per-tag repeat counts.
 

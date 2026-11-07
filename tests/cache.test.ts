@@ -3,6 +3,7 @@ import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test, vi } from "vitest";
+import packageJson from "../package.json";
 import { aseprite } from "../src";
 import { makeAsepriteFixture } from "./fixtures/aseprite-file";
 
@@ -61,6 +62,36 @@ test("converts again when the plugin options change", async () => {
         expect(await run()).toBe(1);
         expect(await run()).toBe(0);
         expect(await run("body")).toBe(1);
+    } finally {
+        await rm(root, { recursive: true, force: true });
+    }
+});
+
+test("converts again when the plugin version changes", async () => {
+    const root = await mkdtemp(join(tmpdir(), "aseprite-cache-version-"));
+    try {
+        const entry = join(root, "input");
+        await mkdir(entry);
+        await writeFile(join(entry, "sprite.aseprite"), makeAsepriteFixture());
+        const run = async (pluginVersion?: string) => {
+            const pipe = aseprite();
+            if (pluginVersion) pipe.defaultOptions.pluginVersion = pluginVersion;
+            const transform = vi.fn(pipe.transform);
+            pipe.transform = transform;
+            await new AssetPack({
+                entry,
+                output: join(root, "output"),
+                cacheLocation: join(root, "cache"),
+                cache: true,
+                strict: true,
+                pipes: [pipe],
+            }).run();
+            return transform.mock.calls.length;
+        };
+        expect(aseprite().defaultOptions.pluginVersion).toBe(packageJson.version);
+        expect(await run()).toBe(1);
+        expect(await run()).toBe(0);
+        expect(await run("999.0.0")).toBe(1);
     } finally {
         await rm(root, { recursive: true, force: true });
     }
