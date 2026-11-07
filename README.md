@@ -13,21 +13,29 @@ Install the plugin and AssetPack as development dependencies. They run during th
 ## Configure AssetPack
 
 ```ts
-import { aseprite } from "@drincs/assetpack-plugin-aseprite";
+import { aseprite, asepriteManifestMod } from "@drincs/assetpack-plugin-aseprite";
 import { pixiPipes } from "@assetpack/core/pixi";
+
+const manifest = { output: "src/manifest.json", createShortcuts: true, trimExtensions: true };
 
 export default {
     entry: "public/assets",
     output: "public/assets-build",
     cache: true,
     cacheLocation: ".assetpack",
-    pipes: [aseprite(), ...pixiPipes()],
+    pipes: [aseprite(), ...pixiPipes({ manifest }), asepriteManifestMod({ output: manifest.output })],
 };
 ```
+
+`aseprite()` must come before `pixiPipes()`. `asepriteManifestMod()` is optional and goes after it, with the same manifest `output`. It adds aliases without the extension (`walk.aseprite` → `walk`), because AssetPack's `trimExtensions` ignores extensions longer than six characters such as `.aseprite`.
 
 AssetPack caches source content hashes and reuses unchanged conversions across builds. Keep the `.assetpack` directory between runs, including in CI, to retain that cache. A source content change or a change to plugin options invalidates the relevant cache. Setting `cache: false` forces conversion again.
 
 Each source file produces a horizontal PNG strip and a PixiJS spritesheet JSON with frame rectangles, frame durations, and named animations from Aseprite tags. The JSON also retains JSON-safe Aseprite data under `meta.aseprite` (document header, layers, tags including playback/repeat settings, slices, palette, color profile, and durations). This data is available to game code after loading the spritesheet. Tags with finite repeats preserve the repeat count as metadata; PixiJS animation definitions themselves do not enforce per-tag repeat counts.
+
+A file without tags gets one animation with every frame, named after the source file (for example `walk.aseprite` exposes `animations.walk`), so it can be played without listing frame names.
+
+With `pixiPipes()`, the manifest entry of each source file points only to the spritesheet JSON files (one per compressed format, such as `.png.json` and `.webp.json`), like AssetPack's own texture packer output. Loading the alias gives a PixiJS `Spritesheet`, never the bare PNG strip.
 
 The default output names replace the source extension, for example `walk.aseprite` becomes `walk.png` and `walk.json`. Use the generated JSON with PixiJS `Spritesheet` / `AnimatedSprite`; this package adds no runtime sprite component.
 

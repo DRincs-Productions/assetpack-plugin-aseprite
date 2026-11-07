@@ -2,6 +2,8 @@ import Aseprite from "ase-parser";
 import { createNewAssetAt, type AssetPipe } from "@assetpack/core";
 import sharp from "sharp";
 
+export { asepriteManifestMod, type AsepriteManifestModOptions } from "./manifest";
+
 export interface AsepritePluginOptions {
     /** Include only raster layers whose names begin with this value. */
     layerPrefix?: string;
@@ -73,11 +75,14 @@ export function aseprite(options: AsepritePluginOptions = {}): AssetPipe {
             })
                 .png()
                 .toBuffer();
-            const json = createSpritesheetJson(ase, rendered, imageName);
+            const json = createSpritesheetJson(ase, rendered, imageName, baseName);
 
             const imageAsset = createNewAssetAt(asset, imageName, pipeSystem.outputPath);
             imageAsset.buffer = png;
             imageAsset.metaData.nomip = true;
+            // The strip is only consumed through the spritesheet JSON, so keep it (and its
+            // compressed variants) out of the manifest entry, as AssetPack's texturePacker does.
+            imageAsset.metaData.mIgnore = true;
 
             const jsonAsset = createNewAssetAt(asset, jsonName, pipeSystem.outputPath);
             jsonAsset.buffer = Buffer.from(JSON.stringify(json, null, 2));
@@ -199,7 +204,12 @@ function composite(
     }
 }
 
-function createSpritesheetJson(ase: Aseprite, frames: RenderedFrame[], imageName: string) {
+function createSpritesheetJson(
+    ase: Aseprite,
+    frames: RenderedFrame[],
+    imageName: string,
+    defaultAnimationName: string,
+) {
     const frameData: Record<string, unknown> = {};
     const animations: Record<string, string[]> = {};
     frames.forEach(({ duration }, index) => {
@@ -234,6 +244,10 @@ function createSpritesheetJson(ase: Aseprite, frames: RenderedFrame[], imageName
         }
         animations[tag.name] = indices.map((index) => `frame${index}`);
     }
+    if (ase.tags.length === 0) {
+        // Without tags, expose every frame as one animation named after the source file.
+        animations[defaultAnimationName] = frames.map((_, index) => `frame${index}`);
+    }
 
     return {
         frames: frameData,
@@ -245,6 +259,9 @@ function createSpritesheetJson(ase: Aseprite, frames: RenderedFrame[], imageName
             format: "RGBA8888",
             size: { w: ase.width * frames.length, h: ase.height },
             scale: "1",
+            // AssetPack's texturePackerCompress hides the per-format JSON copies from the
+            // manifest unless this field exists, as it does in AssetPack's own texture packer.
+            related_multi_packs: [],
             aseprite: {
                 source: ase.name,
                 fileSize: ase.fileSize,

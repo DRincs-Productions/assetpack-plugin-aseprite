@@ -43,7 +43,24 @@ test("converts frames, tags, durations, pixels, and source metadata to AssetPack
     expect([...data.subarray(12, 16)]).toEqual([0, 255, 0, 255]);
     expect([...data.subarray(16, 20)]).toEqual([0, 0, 255, 255]);
     expect(image.metaData.nomip).toBe(true);
+    expect(image.metaData.mIgnore).toBe(true);
     expect(json.metaData.tps).toBe(true);
+});
+
+test("adds an animation with every frame, named after the file, when there are no tags", async () => {
+    const root = new Asset({ path: process.cwd(), isFolder: true });
+    const input = new Asset({ path: join(process.cwd(), "untagged.aseprite") });
+    root.addChild(input);
+    input.buffer = makeAsepriteFixture({ withTags: false });
+    const outputPath = join(process.cwd(), ".tmp-aseprite-test");
+    const pipe = aseprite();
+    const pipeSystem = new PipeSystem({ pipes: [pipe], outputPath, entryPath: process.cwd() });
+    if (!pipe.transform) throw new Error("Aseprite pipe is missing its transform method.");
+    const [, json] = await pipe.transform(input, {}, pipeSystem);
+
+    const metadata = JSON.parse(json.buffer.toString());
+    expect(metadata.animations).toEqual({ untagged: ["frame0", "frame1", "frame2"] });
+    expect(metadata.meta.aseprite.tags).toEqual([]);
 });
 
 test("does not match unrelated asset extensions", () => {

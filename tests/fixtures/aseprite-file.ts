@@ -77,14 +77,14 @@ function frame(chunks: Buffer[], duration: number): Buffer {
     return Buffer.concat([header, body]);
 }
 
-export function makeAsepriteFixture(): Buffer {
+export function makeAsepriteFixture({ withTags = true }: { withTags?: boolean } = {}): Buffer {
     const frames = [
         frame(
             [
                 layerChunk("body"),
                 layerChunk("hidden-group", 1, 0, false),
                 layerChunk("overlay", 0, 1),
-                tagChunk(),
+                ...(withTags ? [tagChunk()] : []),
                 celChunk([255, 0, 0, 255], 0, 0),
                 celChunk([255, 255, 0, 255], 1, 0, 2),
             ],
